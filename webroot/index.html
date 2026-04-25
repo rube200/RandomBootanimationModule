@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Random Bootanimation</title>
+  <link rel="icon" href="data:,">
+</head>
+<body style="background:#111;color:#eee;font-family:sans-serif;line-height:1.4;margin:0;padding:16px">
+
+  <h1 style="font-size:1.4rem;margin:0 0 4px">Boot Animations</h1>
+  <p style="color:#aaa;font-size:.9rem;margin:0 0 16px">
+    Enabled animations are picked at random on boot. Library changes take effect on the next reboot.
+  </p>
+  <p id="status" style="color:#f28b82;display:none;font-size:.85rem;margin:0 0 16px"></p>
+
+  <section style="background:#1a1a1a;border:1px solid #333;border-radius:12px;margin-bottom:16px;padding:16px">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;width:100%">
+      <button
+        id="startImport"
+        type="button"
+        style="background:#7cacf8;border:0;border-radius:8px;color:#111;cursor:pointer;font:inherit;font-weight:600;padding:10px 14px"
+      >Import</button>
+      <button
+        id="seed"
+        type="button"
+        style="background:transparent;border:1px solid #333;border-radius:8px;color:#f28b82;cursor:pointer;font:inherit;padding:10px 14px"
+      >Restore defaults</button>
+    </div>
+    <div id="importPanel" style="display:none;margin-top:12px">
+      <p
+        id="importFileName"
+        style="color:#aaa;font-size:.85rem;margin:0 0 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+      >No file chosen</p>
+      <input id="file" type="file" accept=".zip,application/zip" style="display:none">
+      <label style="color:#aaa;display:block;font-size:.85rem;margin-bottom:12px">
+        Name
+        <input
+          id="label"
+          type="text"
+          placeholder="My animation"
+          autocomplete="off"
+          style="background:#111;border:1px solid #333;border-radius:8px;box-sizing:border-box;color:#eee;display:block;font:inherit;margin-top:6px;padding:10px;width:100%"
+        >
+      </label>
+      <div style="display:flex;flex-wrap:wrap;gap:16px">
+        <button
+          id="confirmImport"
+          type="button"
+          disabled
+          style="background:#7cacf8;border:0;border-radius:8px;color:#111;cursor:not-allowed;font:inherit;font-weight:600;opacity:.45;padding:10px 14px"
+        >Confirm</button>
+        <button
+          id="cancelImport"
+          type="button"
+          style="background:transparent;border:1px solid #333;border-radius:8px;color:#aaa;cursor:pointer;font:inherit;padding:10px 14px"
+        >Cancel</button>
+      </div>
+    </div>
+  </section>
+
+  <section style="background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:16px">
+    <div style="align-items:center;display:flex;gap:8px;justify-content:space-between;margin-bottom:12px">
+      <h2 style="font-size:1rem;margin:0">Library</h2>
+      <button
+        id="refresh"
+        type="button"
+        style="background:transparent;border:1px solid #333;border-radius:8px;color:#7cacf8;cursor:pointer;font:inherit;padding:6px 12px"
+      >Refresh</button>
+    </div>
+    <ul id="list" style="list-style:none;margin:0;padding:0"></ul>
+    <p id="empty" style="color:#aaa;display:none;font-size:.9rem;margin:12px 0 0;text-align:center">
+      No animations in <code style="color:#ccc">/data/adb/bootanimations</code> yet.
+      Tap <strong>Restore defaults</strong> to import bundled files from the module.
+    </p>
+  </section>
+
+  <script>
+    const BIN_CHUNK = 24576;
+    const rowStyle =
+      "align-items:center;border-bottom:1px solid #333;display:flex;gap:10px;padding:12px 0";
+    const removeBtnStyle =
+      "background:transparent;border:1px solid #333;border-radius:8px;color:#f28b82;cursor:pointer;font:inherit;padding:8px 12px";
+
+    const ui = {
+      status: document.getElementById("status"),
+      list: document.getElementById("list"),
+      empty: document.getElementById("empty"),
+      importPanel: document.getElementById("importPanel"),
+      importFileName: document.getElementById("importFileName"),
+      label: document.getElementById("label"),
+      file: document.getElementById("file"),
+      startImport: document.getElementById("startImport"),
+      confirmImport: document.getElementById("confirmImport"),
+      cancelImport: document.getElementById("cancelImport"),
+      seed: document.getElementById("seed"),
+      refresh: document.getElementById("refresh"),
+    };
+
+    let pickedFile = null;
+    let apiScript = "";
+    let apiQueue = Promise.resolve();
+    let libraryFiles = new Set();
+
+    const sh = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
+
+    function execApi(cmd) {
+      return new Promise((resolve, reject) => {
+        window.__ksuApiResult = (code, stdout, stderr) => {
+          delete window.__ksuApiResult;
+          if (code !== 0) {
+            const msg = (stderr || stdout || "").trim();
+            reject(new Error(msg || `Command failed (exit ${code}).`));
+            return;
+          }
+          resolve(stdout || "");
+        };
+        ksu.exec(cmd, "__ksuApiResult");
+      });
+    }
+
+    function api(...args) {
+      if (!apiScript) {
+        if (typeof ksu === "undefined" || !ksu.moduleInfo) {
+          throw new Error("Open this page from KernelSU Next Manager.");
+        }
+        const info = JSON.parse(ksu.moduleInfo());
+        if (!info.moduleDir) {
+          throw new Error("Module path unavailable.");
+        }
+        apiScript = `${info.moduleDir}/scripts/webui.sh`;
+      }
+
+      const tail = args.map(sh).join(" ");
+      const cmd = `sh ${sh(apiScript)}${tail ? ` ${tail}` : ""}`;
+      const run = apiQueue.then(() => execApi(cmd));
+      apiQueue = run.catch(() => {});
+      return run;
+    }
+
+    function setStatus(msg) {
+      ui.status.textContent = msg;
+      ui.status.style.display = msg ? "block" : "none";
+    }
+
+    function fail(action, err) {
+      ksu.toast(`${action} failed`);
+      setStatus(err?.message || `${action} failed.`);
+    }
+
+    function setConfirmReady(ready) {
+      ui.confirmImport.disabled = !ready;
+      ui.confirmImport.style.opacity = ready ? "1" : ".45";
+      ui.confirmImport.style.cursor = ready ? "pointer" : "not-allowed";
+    }
+
+    function displayLabelFromFilename(name) {
+      let text = name.replace(/\.zip$/i, "");
+      text = text.replace(/[\s_]*bootanimations?$/i, "");
+      text = text.replace(/\s+$/, "");
+      text = text.replace(/_/g, " ");
+      return text || name;
+    }
+
+    function resetImportPanel() {
+      pickedFile = null;
+      ui.file.value = "";
+      ui.label.value = "";
+      ui.importFileName.textContent = "No file chosen";
+      setConfirmReady(false);
+      ui.importPanel.style.display = "none";
+    }
+
+    function setPickedFile(file) {
+      pickedFile = file || null;
+      if (!pickedFile) {
+        ui.importFileName.textContent = "No file chosen";
+        setConfirmReady(false);
+        return;
+      }
+      ui.importPanel.style.display = "block";
+      ui.importFileName.textContent = pickedFile.name;
+      ui.label.value = displayLabelFromFilename(pickedFile.name);
+      setConfirmReady(true);
+    }
+
+    function bytesToBase64(bytes) {
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 8192) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+      }
+      return btoa(binary);
+    }
+
+    async function isZipFile(file) {
+      const buf = await file.slice(0, 2).arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      return bytes.length === 2 && bytes[0] === 0x50 && bytes[1] === 0x4b;
+    }
+
+    function libraryHasFile(name) {
+      const lower = name.toLowerCase();
+      for (const file of libraryFiles) {
+        if (file.toLowerCase() === lower) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    async function uploadZip(file) {
+      await api("upload-reset", file.name);
+      let offset = 0;
+      while (offset < file.size) {
+        const slice = file.slice(offset, offset + BIN_CHUNK);
+        const buf = await slice.arrayBuffer();
+        await api("upload-append", bytesToBase64(new Uint8Array(buf)));
+        offset += BIN_CHUNK;
+      }
+      await api("import-upload", file.name, ui.label.value.trim());
+    }
+
+    function renderRow(item) {
+      const li = document.createElement("li");
+      li.style.cssText = rowStyle;
+
+      const info = document.createElement("div");
+      info.style.cssText = "flex:1;min-width:0";
+
+      const label = document.createElement("div");
+      label.style.cssText =
+        "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+      label.textContent = item.label;
+
+      const file = document.createElement("div");
+      file.style.cssText = "color:#aaa;font-size:.8rem;overflow:hidden;text-overflow:ellipsis";
+      file.textContent = item.file;
+
+      const toggle = document.createElement("input");
+      toggle.type = "checkbox";
+      toggle.checked = item.on === 1 || item.on === true;
+      toggle.dataset.file = item.file;
+      toggle.style.cssText = "height:20px;width:20px";
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "Remove";
+      remove.dataset.file = item.file;
+      remove.dataset.label = item.label;
+      remove.style.cssText = removeBtnStyle;
+
+      info.append(label, file);
+      li.append(info, toggle, remove);
+      return li;
+    }
+
+    function parseLibrary(raw) {
+      const items = [];
+      let bad = 0;
+
+      for (const line of (raw || "").trim().split(/\r?\n/)) {
+        const trimmed = line.replace(/\r$/, "").trim();
+        if (!trimmed || trimmed.charAt(0) !== "{") {
+          continue;
+        }
+        try {
+          items.push(JSON.parse(trimmed));
+        } catch (_) {
+          bad += 1;
+        }
+      }
+
+      return { items, bad };
+    }
+
+    async function loadLibrary() {
+      setStatus("");
+      const { items, bad } = parseLibrary(await api("list"));
+
+      if (bad > 0) {
+        setStatus(`Warning: ${bad} entr${bad === 1 ? "y" : "ies"} could not be read.`);
+      }
+
+      items.sort((a, b) => a.label.localeCompare(b.label));
+      libraryFiles = new Set(items.map((item) => item.file));
+      ui.list.replaceChildren(...items.map(renderRow));
+      ui.empty.style.display = items.length ? "none" : "block";
+    }
+
+    ui.list.addEventListener("change", async (e) => {
+      const toggle = e.target;
+      if (toggle.type !== "checkbox") {
+        return;
+      }
+
+      const was = !toggle.checked;
+      try {
+        await api("toggle", toggle.dataset.file, toggle.checked ? "1" : "0");
+        ksu.toast(toggle.checked ? "Enabled" : "Disabled");
+      } catch (err) {
+        toggle.checked = was;
+        fail("Toggle", err);
+      }
+    });
+
+    ui.list.addEventListener("click", async (e) => {
+      const btn = e.target.closest("button");
+      if (!btn) {
+        return;
+      }
+
+      const name = btn.dataset.label || btn.dataset.file;
+      if (!confirm("Remove " + name + "?")) {
+        return;
+      }
+
+      try {
+        await api("remove", btn.dataset.file);
+        ksu.toast("Removed");
+        await loadLibrary();
+      } catch (err) {
+        fail("Remove", err);
+      }
+    });
+
+    ui.startImport.addEventListener("click", () => {
+      ui.file.click();
+    });
+
+    ui.cancelImport.addEventListener("click", () => {
+      resetImportPanel();
+    });
+
+    ui.file.addEventListener("change", () => {
+      const file = ui.file.files[0];
+      if (!file) {
+        return;
+      }
+      if (!/\.zip$/i.test(file.name)) {
+        ksu.toast("Choose a .zip file");
+        ui.file.value = "";
+        return;
+      }
+      if (/[/\\]|\.\./.test(file.name)) {
+        ksu.toast("Invalid filename");
+        ui.file.value = "";
+        return;
+      }
+      setPickedFile(file);
+    });
+
+    ui.confirmImport.addEventListener("click", async () => {
+      if (!pickedFile) {
+        return;
+      }
+
+      if (libraryHasFile(pickedFile.name)) {
+        ksu.toast("Already in library");
+        setStatus("That filename is already in your library.");
+        return;
+      }
+
+      setConfirmReady(false);
+      setStatus("Checking file…");
+
+      try {
+        if (!(await isZipFile(pickedFile))) {
+          ksu.toast("Not a zip file");
+          setStatus("The chosen file is not a valid zip.");
+          setConfirmReady(true);
+          return;
+        }
+
+        setStatus("Importing…");
+        await uploadZip(pickedFile);
+        setStatus("");
+        ksu.toast("Imported");
+        resetImportPanel();
+        await loadLibrary();
+      } catch (err) {
+        fail("Import", err);
+        setConfirmReady(true);
+      }
+    });
+
+    ui.seed.addEventListener("click", async () => {
+      try {
+        await api("seed");
+        ksu.toast("Defaults restored");
+        await loadLibrary();
+      } catch (err) {
+        fail("Restore", err);
+      }
+    });
+
+    ui.refresh.addEventListener("click", async () => {
+      try {
+        await loadLibrary();
+        ksu.toast("Refreshed");
+      } catch (err) {
+        fail("Refresh", err);
+      }
+    });
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      loadLibrary().catch(() => {
+        /* keep current list */
+      });
+    });
+
+    loadLibrary().catch((err) => {
+      ui.list.replaceChildren();
+      ui.empty.style.display = "block";
+      fail("Load", err);
+    });
+  </script>
+</body>
+</html>

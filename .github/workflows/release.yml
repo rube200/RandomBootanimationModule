@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-slim
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify manual release branch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          [ "${{ github.ref_name }}" = "$DEFAULT_BRANCH" ] || {
+            echo "Manual releases must run on $DEFAULT_BRANCH (current: ${{ github.ref_name }})"
+            exit 1
+          }
+
+      - name: Verify tag is on default branch
+        if: github.event_name == 'push'
+        run: |
+          git fetch origin "$DEFAULT_BRANCH"
+          git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH" || {
+            echo "Tag commit must be reachable from origin/$DEFAULT_BRANCH"
+            exit 1
+          }
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq shellcheck zip
+
+      - name: Prepare metadata
+        id: prepare
+        env:
+          REPO_NAME: ${{ github.event.repository.name }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          [[ "$RELEASE_VERSION" =~ ^v[0-9A-Za-z._-]+$ ]] || { echo "Invalid version: $RELEASE_VERSION"; exit 1; }
+
+          dateCode=$(date -u +%Y%m%d)
+          lastCode=$(jq -er '.versionCode // 0' update.json 2>/dev/null || echo 0)
+          base=$((dateCode * 10))
+
+          if [ "$lastCode" -ge "$base" ] && [ $((lastCode / 10)) -eq "$dateCode" ]; then
+            [ "$lastCode" -lt $((base + 9)) ] || { echo "Error: max 10 releases per UTC day for $dateCode" >&2; exit 1; }
+            versionCode=$((lastCode + 1))
+          else
+            versionCode=$base
+          fi
+
+          sed -i "s|^id=INJECTED|id=${REPO_NAME}|" module.prop
+          sed -i "s|^author=INJECTED|author=${REPO_OWNER}|" module.prop
+          sed -i "s|^version=.*|version=${RELEASE_VERSION}|" module.prop
+          sed -i "s|^versionCode=.*|versionCode=${versionCode}|" module.prop
+          sed -i "s|^updateJson=.*|updateJson=https://raw.githubusercontent.com/${{ github.repository }}/${DEFAULT_BRANCH}/update.json|" module.prop
+
+          echo "id=$(sed -n 's/^id=//p' module.prop | head -1)" >> "$GITHUB_OUTPUT"
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "versionCode=$versionCode" >> "$GITHUB_OUTPUT"
+
+      - name: Validate module
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: bash scripts/validate.sh
+
+      - name: Build module
+        id: build
+        env:
+          MODULE_ID: ${{ steps.prepare.outputs.id }}
+          RELEASE_VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          zip_name="${MODULE_ID}_${RELEASE_VERSION}.zip"
+          echo "zip_name=build/${zip_name}" >> "$GITHUB_OUTPUT"
+          echo "zip_file=${zip_name}" >> "$GITHUB_OUTPUT"
+
+          mkdir -p build
+          zip -r9 "build/${zip_name}" . \
+            -x ".editorconfig" \
+            -x ".env" \
+            -x ".env.*" \
+            -x ".git/*" \
+            -x ".gitattributes" \
+            -x ".github/*" \
+            -x ".gitignore" \
+            -x "build/*" \
+            -x "CHANGELOG.md" \
+            -x "README.md" \
+            -x "release-notes.md" \
+            -x "scripts/validate.sh" \
+            -x "update.json" \
+            -x "update.json.tmp"
+
+      - name: Extract changelog
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          awk -v version="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              found = index($0, "## [" version "]") == 1
+            }
+            found
+          ' CHANGELOG.md > release-notes.md
+          [ -s release-notes.md ] || {
+            echo "Error: empty release notes for ## [$VERSION]" >&2
+            exit 1
+          }
+
+      - name: Create release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+          ZIP: ${{ steps.build.outputs.zip_name }}
+        run: |
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" "$ZIP" --clobber
+            gh release edit "$VERSION" --notes-file release-notes.md
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            gh release create "$VERSION" --target "$DEFAULT_BRANCH" --title "$VERSION" --notes-file release-notes.md "$ZIP"
+          else
+            gh release create "$VERSION" --title "$VERSION" --notes-file release-notes.md "$ZIP"
+          fi
+
+      - name: Commit and push update.json
+        id: push_update
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+          VERSION_CODE: ${{ steps.prepare.outputs.versionCode }}
+          ZIP_FILE: ${{ steps.build.outputs.zip_file }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout -f "$DEFAULT_BRANCH"
+          git reset --hard "origin/$DEFAULT_BRANCH"
+
+          jq -n \
+            --arg changelog "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${DEFAULT_BRANCH}/CHANGELOG.md" \
+            --arg version "$VERSION" \
+            --argjson versionCode "$VERSION_CODE" \
+            --arg zipUrl "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${ZIP_FILE}" \
+            '{
+              changelog: $changelog,
+              version: $version,
+              versionCode: $versionCode,
+              zipUrl: $zipUrl
+            }' > update.json.tmp
+          mv update.json.tmp update.json
+
+          git add update.json
+
+          if git diff --staged --quiet; then
+            echo "Error: update.json unchanged for $VERSION" >&2
+            exit 1
+          fi
+
+          git commit -m "[BOT] Bump update.json for $VERSION"
+          git push origin "$DEFAULT_BRANCH"
+
+      - name: Roll back release
+        if: failure() && steps.release.outcome == 'success' && steps.push_update.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          echo "update.json push failed; deleting release $VERSION"
+          gh release delete "$VERSION" --yes
