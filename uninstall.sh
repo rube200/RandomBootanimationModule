@@ -7,5 +7,5 @@ MODDIR=$(pwd)
 . "$MODDIR/scripts/lib.sh"
 
 overlay_clear
-log -t random-bootanimation "Uninstall: overlay cleared"
+log -t RandomBootanimation "Uninstall: overlay cleared"
 exit 0

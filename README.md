@@ -1,4 +1,4 @@
-# Random Bootanimation
+# Random Bootanimation Module
 
 A **[KernelSU Next](https://github.com/KernelSU-Next/KernelSU-Next)** module that picks a random boot animation on every reboot.
 
@@ -21,7 +21,7 @@ Your library lives at `/data/adb/bootanimations`, outside the module directory, 
 
 ## Installation
 
-1. Download the latest release zip from [GitHub Releases](https://github.com/rube200/Random-Bootanimation/releases).
+1. Download the latest release zip from [GitHub Releases](https://github.com/rube200/RandomBootanimationModule/releases).
 2. Open **KernelSU Next Manager** → **Modules** → install the zip.
 3. Reboot.
 
@@ -32,7 +32,7 @@ Module updates do not touch your library. Reinstalling or updating the module ke
 ## WebUI
 
 1. Open **KernelSU Next Manager**.
-2. Go to **Modules** → **Random Bootanimation**.
+2. Go to **Modules** → **Random Bootanimation Module**.
 3. Tap **WebUI**.
 
 | Action | What it does |
@@ -115,7 +115,7 @@ Eight defaults ship in `BootAnimations/` from [mauam's Bootanimations collection
 
 | Symptom | What to check |
 |---------|----------------|
-| Animation unchanged after reboot | Run `logcat -d -s random-bootanimation` — look for `bind ok:` on your ROM path. If bind failed, restore or recreate stock `bootanimation.zip` (below). On some ROMs bootanim reads the file before `post-fs-data` runs; that timing limit cannot be fixed in-module |
+| Animation unchanged after reboot | Run `logcat -d -s RandomBootanimation` — look for `bind ok:` on your ROM path. If bind failed, restore or recreate stock `bootanimation.zip` (below). On some ROMs bootanim reads the file before `post-fs-data` runs; that timing limit cannot be fixed in-module |
 | `chown: unknown user/group` during install | Old module zip without `customize.sh`. Install a current release |
 | Custom animation after disabling the module | Reboot once. Disabled modules skip `post-fs-data.sh`, so no new bind is applied |
 | Import fails | File must be a valid `.zip`; name must not already exist in the library (case-insensitive) |
@@ -144,7 +144,7 @@ Use `/system` or `/system/product` instead of `/product` if that is where your R
 Boot-time logs (`post-fs-data.sh`):
 
 ```sh
-logcat -d -s random-bootanimation
+logcat -d -s RandomBootanimation
 ```
 
 Look for `bind ok:` or `bind failed:` / `bind skip` lines. Module hook failures do not block boot — if bind-mount fails, the device falls back to the stock boot animation.

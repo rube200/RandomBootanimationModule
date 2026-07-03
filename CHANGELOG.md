@@ -1,5 +1,12 @@
 # Changelog
 
+## [v1.0.1]
+
+- Log tag renamed to `RandomBootanimation` (was `random-bootanimation`)
+- Module display name updated to Random Bootanimation Module
+- README and WebUI titles updated for the repo rename
+- Repository renamed to `RandomBootanimationModule`
+
 ## [v1.0.0]
 
 - 8 bundled animations, auto-imported when the library is empty

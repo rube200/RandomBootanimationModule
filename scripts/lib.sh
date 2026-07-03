@@ -211,24 +211,24 @@ _overlay_ensure_dest_file() {
 
   if [ -L "$dest" ]; then
     if [ ! -e "$dest" ]; then
-      log -t random-bootanimation "bind skip broken symlink: $dest" 2>/dev/null
+      log -t RandomBootanimation "bind skip broken symlink: $dest" 2>/dev/null
       return 1
     fi
   fi
 
   if touch "$dest" 2>/dev/null; then
-    log -t random-bootanimation "created mount point: $dest" 2>/dev/null
+    log -t RandomBootanimation "created mount point: $dest" 2>/dev/null
     return 0
   fi
 
-  log -t random-bootanimation "touch failed, remounting rw for $dest" 2>/dev/null
+  log -t RandomBootanimation "touch failed, remounting rw for $dest" 2>/dev/null
   _overlay_remount_rw_for_path "$dest"
   if touch "$dest" 2>/dev/null; then
-    log -t random-bootanimation "created mount point after remount: $dest" 2>/dev/null
+    log -t RandomBootanimation "created mount point after remount: $dest" 2>/dev/null
     return 0
   fi
 
-  log -t random-bootanimation "bind skip cannot create: $dest" 2>/dev/null
+  log -t RandomBootanimation "bind skip cannot create: $dest" 2>/dev/null
   return 1
 }
 
@@ -237,7 +237,7 @@ _overlay_bind_dest() {
   parent=${dest%/*}
 
   if [ ! -d "$parent" ]; then
-    log -t random-bootanimation "bind skip no parent: $parent" 2>/dev/null
+    log -t RandomBootanimation "bind skip no parent: $parent" 2>/dev/null
     return 1
   fi
 
@@ -250,11 +250,11 @@ _overlay_bind_dest() {
   fi
 
   if mount -o bind "$ACTIVE_ZIP" "$dest" 2>/dev/null; then
-    log -t random-bootanimation "bind ok: $dest" 2>/dev/null
+    log -t RandomBootanimation "bind ok: $dest" 2>/dev/null
     return 0
   fi
 
-  log -t random-bootanimation "bind failed: $dest" 2>/dev/null
+  log -t RandomBootanimation "bind failed: $dest" 2>/dev/null
   return 1
 }
 
