@@ -68,13 +68,18 @@ jobs:
             versionCode=$base
           fi
 
-          sed -i "s|^id=INJECTED|id=${REPO_NAME}|" module.prop
+          MODULE_ID=$(printf '%s' "$REPO_NAME" \
+            | sed -E 's/([a-z0-9])([A-Z])/\1-\2/g; s/([A-Z]+)([A-Z][a-z])/\1-\2/g' \
+            | tr '[:upper:]' '[:lower:]' \
+            | tr '_' '-')
+
+          sed -i "s|^id=INJECTED|id=${MODULE_ID}|" module.prop
           sed -i "s|^author=INJECTED|author=${REPO_OWNER}|" module.prop
           sed -i "s|^version=.*|version=${RELEASE_VERSION}|" module.prop
           sed -i "s|^versionCode=.*|versionCode=${versionCode}|" module.prop
           sed -i "s|^updateJson=.*|updateJson=https://raw.githubusercontent.com/${{ github.repository }}/${DEFAULT_BRANCH}/update.json|" module.prop
 
-          echo "id=$(sed -n 's/^id=//p' module.prop | head -1)" >> "$GITHUB_OUTPUT"
+          echo "id=${MODULE_ID}" >> "$GITHUB_OUTPUT"
           echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "versionCode=$versionCode" >> "$GITHUB_OUTPUT"
 

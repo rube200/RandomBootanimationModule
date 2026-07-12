@@ -3,11 +3,9 @@
 PATH=/sbin:/system/bin:/system/xbin:/vendor/bin:$PATH
 export PATH
 
-if ! cd "$(dirname "$0")/.."; then
-  exit 1
-fi
-MODDIR=$(pwd)
+MODDIR=${0%/*}/..
 . "$MODDIR/scripts/lib.sh"
+ksu_ensure_module_id || exit 1
 
 UPLOAD_DIR=/data/local/tmp/random-bootanim-import
 
@@ -23,32 +21,16 @@ json_escape() {
     -e "s/${_cr}/\\\\r/g"
 }
 
-label_show() {
-  name="$1"
-  if [ -f "$ANIM_META/labels/$name" ]; then
-    label=$(tr -d '\n' <"$ANIM_META/labels/$name")
-    if [ -n "$label" ]; then
-      printf '%s' "$label"
-      return
-    fi
-  fi
-  anim_display_label "$name"
-}
-
 import_anim() {
   src="$1"
   label="$2"
-  if [ ! -f "$src" ]; then
-    printf 'File not found: %s\n' "$src" >&2
-    return 1
-  fi
   if [ -n "$label" ]; then
     label=$(printf '%s' "$label" | sed 's/[[:space:]]*$//')
   fi
   if [ -z "$label" ]; then
     label=$(anim_display_label "$(basename "$src")")
   fi
-  anim_add "$src" "$label" >/dev/null
+  anim_add "$src" "$label"
 }
 
 remove_anim() {
@@ -56,7 +38,9 @@ remove_anim() {
   if ! anim_require_zip "$name"; then
     return 1
   fi
-  rm -f "$ANIM_DIR/$name" "$ANIM_META/disabled/$name" "$ANIM_META/labels/$name"
+  rm -f "$ANIM_DIR/$name"
+  anim_disabled_remove "$name"
+  anim_label_set "$name" ""
 }
 
 set_enabled() {
@@ -66,9 +50,9 @@ set_enabled() {
     return 1
   fi
   if [ "$on" = 1 ]; then
-    rm -f "$ANIM_META/disabled/$name"
+    anim_disabled_remove "$name"
   elif [ "$on" = 0 ]; then
-    touch "$ANIM_META/disabled/$name"
+    anim_disabled_add "$name"
   else
     return 1
   fi
@@ -80,13 +64,29 @@ list_json() {
       continue
     fi
     name=$(basename "$path")
-    label=$(json_escape "$(label_show "$name")")
+    label=$(json_escape "$(anim_label_show "$name")")
     file=$(json_escape "$name")
     on=0
     if anim_enabled "$name"; then
       on=1
     fi
     printf '{"file":"%s","label":"%s","on":%s}\n' "$file" "$label" "$on"
+  done
+}
+
+seed_bundled() {
+  find "$MODDIR/BootAnimations" -maxdepth 1 -type f -iname '*.zip' -print 2>/dev/null \
+    | LC_ALL=C sort \
+    | while IFS= read -r src; do
+    if [ -z "$src" ]; then
+      continue
+    fi
+    base=$(basename "$src")
+    if [ -f "$ANIM_DIR/$base" ]; then
+      anim_disabled_remove "$base"
+      continue
+    fi
+    anim_add "$src" "$(anim_display_label "$base")"
   done
 }
 

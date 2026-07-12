@@ -1,37 +1,62 @@
 #!/system/bin/sh
 
 ANIM_DIR=/data/adb/bootanimations
-ANIM_META="$ANIM_DIR/.meta"
-ACTIVE_ZIP="$ANIM_META/active/bootanimation.zip"
-OVERLAY_DEV_PATHS="/product/media /system/media /system/product/media"
-overlay_msg=
+
+ksu_ensure_module_id() {
+  if [ -z "${MODDIR:-}" ] || [ ! -f "$MODDIR/module.prop" ]; then
+    return 1
+  fi
+  export MODDIR
+  if [ -z "${KSU_MODULE:-}" ]; then
+    KSU_MODULE=$(grep '^id=' "$MODDIR/module.prop" | head -1 | cut -d= -f2-)
+    [ -n "$KSU_MODULE" ] || return 1
+  fi
+  export KSU_MODULE
+  return 0
+}
+
+ksu_cfg_get() {
+  ksu_ensure_module_id || return 1
+  ksud module config get "$1" 2>/dev/null
+}
+
+ksu_cfg_set() {
+  ksu_ensure_module_id || return 1
+  printf '%s' "$2" | ksud module config set "$1" --stdin
+}
+
+ksu_cfg_set_temp() {
+  ksu_ensure_module_id || return 1
+  printf '%s' "$2" | ksud module config set "$1" --temp --stdin
+}
+
+ksu_cfg_delete() {
+  ksu_ensure_module_id || return 1
+  ksud module config delete "$1" 2>/dev/null
+}
 
 anim_ensure_dirs() {
-  if ! mkdir -p "$ANIM_DIR" "$ANIM_META/disabled" "$ANIM_META/labels" "$ANIM_META/active"; then
+  if ! mkdir -p "$ANIM_DIR"; then
     return 1
   fi
   chown -R 0:0 "$ANIM_DIR" 2>/dev/null
   chmod 0755 "$ANIM_DIR" 2>/dev/null
-  chmod 0700 "$ANIM_META" 2>/dev/null
-  for path in "$ANIM_DIR"/*.zip "$ANIM_DIR"/*.ZIP; do
-    if [ -f "$path" ]; then
-      chmod 0644 "$path" 2>/dev/null
-    fi
-  done
-}
-
-anim_valid() {
-  case "$1" in
-    *.zip | *.ZIP) ;;
-    *) return 1 ;;
-  esac
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    chmod 0644 "$path" 2>/dev/null
+  done <<EOF
+$(anim_zip_paths)
+EOF
 }
 
 anim_safe_name() {
   case "$1" in
     */* | *..*) return 1 ;;
   esac
-  anim_valid "$1"
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    *.zip) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 anim_is_zip_file() {
@@ -57,7 +82,7 @@ anim_zip_paths() {
   if [ ! -d "$ANIM_DIR" ]; then
     return 0
   fi
-  find "$ANIM_DIR" -maxdepth 1 -type f \( -name '*.zip' -o -name '*.ZIP' \) -print 2>/dev/null \
+  find "$ANIM_DIR" -maxdepth 1 -type f -iname '*.zip' -print 2>/dev/null \
     | LC_ALL=C sort
 }
 
@@ -82,20 +107,159 @@ anim_require_zip() {
 anim_name_taken() {
   name="$1"
   lower=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
-  for path in "$ANIM_DIR"/*.zip "$ANIM_DIR"/*.ZIP; do
-    if [ ! -f "$path" ]; then
-      continue
-    fi
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
     base=$(basename "$path")
     if [ "$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')" = "$lower" ]; then
       return 0
     fi
-  done
+  done <<EOF
+$(anim_zip_paths)
+EOF
   return 1
 }
 
+_cfg_disabled_list() {
+  ksu_cfg_get library.disabled
+}
+
+_cfg_labels_list() {
+  ksu_cfg_get library.labels
+}
+
+_cfg_set_disabled_list() {
+  if [ -z "$1" ]; then
+    ksu_cfg_delete library.disabled
+    return
+  fi
+  ksu_cfg_set library.disabled "$1"
+}
+
+_cfg_set_labels_list() {
+  if [ -z "$1" ]; then
+    ksu_cfg_delete library.labels
+    return
+  fi
+  ksu_cfg_set library.labels "$1"
+}
+
 anim_enabled() {
-  [ ! -f "$ANIM_META/disabled/$1" ]
+  name="$1"
+  list=$(_cfg_disabled_list)
+  if [ -z "$list" ]; then
+    return 0
+  fi
+  if printf '%s\n' "$list" | grep -Fxq "$name"; then
+    return 1
+  fi
+  return 0
+}
+
+anim_label_get() {
+  name="$1"
+  list=$(_cfg_labels_list)
+  if [ -z "$list" ]; then
+    return 1
+  fi
+  line=$(printf '%s\n' "$list" | while IFS= read -r _line; do
+    case "$_line" in
+      "$name"=*) printf '%s' "$_line"; break ;;
+    esac
+  done)
+  if [ -z "$line" ]; then
+    return 1
+  fi
+  printf '%s' "${line#"$name="}"
+}
+
+anim_label_show() {
+  name="$1"
+  label=$(anim_label_get "$name")
+  if [ -n "$label" ]; then
+    printf '%s' "$label"
+    return
+  fi
+  anim_display_label "$name"
+}
+
+anim_label_set() {
+  name="$1"
+  label="$2"
+  list=$(_cfg_labels_list)
+  out=
+  found=0
+  if [ -n "$list" ]; then
+    while IFS= read -r line; do
+      if [ -z "$line" ]; then
+        continue
+      fi
+      case "$line" in
+        "$name"=*)
+          found=1
+          if [ -n "$label" ]; then
+            if [ -n "$out" ]; then
+              out=$(printf '%s\n%s=%s' "$out" "$name" "$label")
+            else
+              out=$(printf '%s=%s' "$name" "$label")
+            fi
+          fi
+          ;;
+        *)
+          if [ -n "$out" ]; then
+            out=$(printf '%s\n%s' "$out" "$line")
+          else
+            out=$line
+          fi
+          ;;
+      esac
+    done <<EOF
+$list
+EOF
+  fi
+  if [ "$found" -eq 0 ] && [ -n "$label" ]; then
+    if [ -n "$out" ]; then
+      out=$(printf '%s\n%s=%s' "$out" "$name" "$label")
+    else
+      out=$(printf '%s=%s' "$name" "$label")
+    fi
+  fi
+  _cfg_set_labels_list "$out"
+}
+
+anim_disabled_add() {
+  name="$1"
+  list=$(_cfg_disabled_list)
+  if [ -n "$list" ] && printf '%s\n' "$list" | grep -Fxq "$name"; then
+    return 0
+  fi
+  if [ -n "$list" ]; then
+    list=$(printf '%s\n%s' "$list" "$name")
+  else
+    list=$name
+  fi
+  _cfg_set_disabled_list "$list"
+}
+
+anim_disabled_remove() {
+  name="$1"
+  list=$(_cfg_disabled_list)
+  if [ -z "$list" ]; then
+    return 0
+  fi
+  out=
+  while IFS= read -r line; do
+    if [ -z "$line" ] || [ "$line" = "$name" ]; then
+      continue
+    fi
+    if [ -n "$out" ]; then
+      out=$(printf '%s\n%s' "$out" "$line")
+    else
+      out=$line
+    fi
+  done <<EOF
+$list
+EOF
+  _cfg_set_disabled_list "$out"
 }
 
 anim_add() {
@@ -124,233 +288,6 @@ anim_add() {
   fi
   chmod 0644 "$ANIM_DIR/$name" 2>/dev/null
   if [ -n "$label" ]; then
-    printf '%s' "$label" >"$ANIM_META/labels/$name"
+    anim_label_set "$name" "$label"
   fi
-  printf '%s' "$name"
-}
-
-seed_bundled() {
-  find "$MODDIR/BootAnimations" -maxdepth 1 -type f \( -name '*.zip' -o -name '*.ZIP' \) -print 2>/dev/null \
-    | LC_ALL=C sort \
-    | while IFS= read -r src; do
-    if [ -z "$src" ]; then
-      continue
-    fi
-    base=$(basename "$src")
-    if [ -f "$ANIM_DIR/$base" ]; then
-      rm -f "$ANIM_META/disabled/$base"
-      continue
-    fi
-    anim_add "$src" "$(anim_display_label "$base")" >/dev/null
-  done
-}
-
-anim_enabled_paths() {
-  while IFS= read -r path; do
-    if [ -z "$path" ]; then
-      continue
-    fi
-    if anim_enabled "$(basename "$path")"; then
-      printf '%s\n' "$path"
-    fi
-  done <<EOF
-$(anim_zip_paths)
-EOF
-}
-
-_overlay_selinux() {
-  zip=$1
-  ctx=
-  for dev in $OVERLAY_DEV_PATHS; do
-    ref="$dev/bootanimation.zip"
-    if [ -f "$ref" ]; then
-      line=$(ls -Z "$ref" 2>/dev/null)
-      ctx=${line%% *}
-      if [ -n "$ctx" ]; then
-        break
-      fi
-    fi
-  done
-  if [ -z "$ctx" ]; then
-    ctx=u:object_r:system_file:s0
-  fi
-  chcon "$ctx" "$zip" 2>/dev/null
-}
-
-_overlay_is_mounted() {
-  dest=$1
-  while IFS= read -r line; do
-    rest=${line#* }
-    mp=${rest%% *}
-    if [ "$mp" = "$dest" ]; then
-      return 0
-    fi
-  done < /proc/mounts 2>/dev/null
-  return 1
-}
-
-_overlay_remount_rw_for_path() {
-  path=$1
-  for mnt in /oem /product /system /system_ext /vendor; do
-    case "$path" in
-      "$mnt" | "$mnt"/*)
-        mount -o remount,rw "$mnt" 2>/dev/null
-        return 0
-        ;;
-    esac
-  done
-  return 1
-}
-
-_overlay_ensure_dest_file() {
-  dest=$1
-
-  if [ -f "$dest" ]; then
-    return 0
-  fi
-
-  if [ -L "$dest" ]; then
-    if [ ! -e "$dest" ]; then
-      log -t RandomBootanimation "bind skip broken symlink: $dest" 2>/dev/null
-      return 1
-    fi
-  fi
-
-  if touch "$dest" 2>/dev/null; then
-    log -t RandomBootanimation "created mount point: $dest" 2>/dev/null
-    return 0
-  fi
-
-  log -t RandomBootanimation "touch failed, remounting rw for $dest" 2>/dev/null
-  _overlay_remount_rw_for_path "$dest"
-  if touch "$dest" 2>/dev/null; then
-    log -t RandomBootanimation "created mount point after remount: $dest" 2>/dev/null
-    return 0
-  fi
-
-  log -t RandomBootanimation "bind skip cannot create: $dest" 2>/dev/null
-  return 1
-}
-
-_overlay_bind_dest() {
-  dest=$1
-  parent=${dest%/*}
-
-  if [ ! -d "$parent" ]; then
-    log -t RandomBootanimation "bind skip no parent: $parent" 2>/dev/null
-    return 1
-  fi
-
-  if ! _overlay_ensure_dest_file "$dest"; then
-    return 1
-  fi
-
-  if _overlay_is_mounted "$dest"; then
-    umount "$dest" 2>/dev/null
-  fi
-
-  if mount -o bind "$ACTIVE_ZIP" "$dest" 2>/dev/null; then
-    log -t RandomBootanimation "bind ok: $dest" 2>/dev/null
-    return 0
-  fi
-
-  log -t RandomBootanimation "bind failed: $dest" 2>/dev/null
-  return 1
-}
-
-overlay_clear() {
-  for dev in $OVERLAY_DEV_PATHS; do
-    dest="$dev/bootanimation.zip"
-    if _overlay_is_mounted "$dest"; then
-      umount "$dest" 2>/dev/null
-    fi
-  done
-  rm -f "$ACTIVE_ZIP"
-}
-
-# overlay_msg is read by post-fs-data.sh after overlay_apply.
-# shellcheck disable=SC2034
-overlay_apply() {
-  has_dev=
-  for dev in $OVERLAY_DEV_PATHS; do
-    if [ -d "$dev" ]; then
-      has_dev=1
-      break
-    fi
-  done
-  if [ -z "$has_dev" ]; then
-    overlay_msg="no bootanimation path on this device"
-    overlay_clear
-    return 1
-  fi
-
-  enabled=$(anim_enabled_paths)
-  if [ -z "$enabled" ]; then
-    overlay_clear
-    overlay_msg="no enabled bootanimations"
-    return 1
-  fi
-
-  count=0
-  while IFS= read -r path; do
-    if [ -z "$path" ]; then
-      continue
-    fi
-    count=$((count + 1))
-  done <<EOF
-$enabled
-EOF
-
-  pick=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ')
-  if [ -z "$pick" ]; then
-    pick=$(date +%s)
-  fi
-  want=$((pick % count + 1))
-
-  selected=
-  idx=0
-  while IFS= read -r path; do
-    if [ -z "$path" ]; then
-      continue
-    fi
-    idx=$((idx + 1))
-    if [ "$idx" -eq "$want" ]; then
-      selected=$path
-      break
-    fi
-  done <<EOF
-$enabled
-EOF
-
-  if [ -z "$selected" ]; then
-    overlay_msg="failed to pick bootanimation"
-    return 1
-  fi
-
-  overlay_clear
-  if ! cp -af "$selected" "$ACTIVE_ZIP"; then
-    overlay_msg="failed to stage $(basename "$selected")"
-    return 1
-  fi
-  chmod 0644 "$ACTIVE_ZIP" 2>/dev/null
-  _overlay_selinux "$ACTIVE_ZIP"
-
-  ok=0
-  for dev in $OVERLAY_DEV_PATHS; do
-    if [ ! -d "$dev" ]; then
-      continue
-    fi
-    if _overlay_bind_dest "$dev/bootanimation.zip"; then
-      ok=1
-    fi
-  done
-
-  if [ "$ok" -eq 0 ]; then
-    overlay_clear
-    overlay_msg="failed to bind-mount $(basename "$selected")"
-    return 1
-  fi
-
-  overlay_msg="selected: $(basename "$selected")"
-  return 0
 }

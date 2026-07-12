@@ -105,7 +105,7 @@
 
     const sh = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
 
-    function execApi(cmd) {
+    async function execApi(cmd) {
       return new Promise((resolve, reject) => {
         window.__ksuApiResult = (code, stdout, stderr) => {
           delete window.__ksuApiResult;
@@ -116,14 +116,15 @@
           }
           resolve(stdout || "");
         };
-        ksu.exec(cmd, "__ksuApiResult");
+        const options = JSON.stringify({});
+        ksu.exec(cmd, options, "__ksuApiResult");
       });
     }
 
     function api(...args) {
       if (!apiScript) {
         if (typeof ksu === "undefined" || !ksu.moduleInfo) {
-          throw new Error("Open this page from KernelSU Next Manager.");
+          throw new Error("Open this page from KernelSU Manager.");
         }
         const info = JSON.parse(ksu.moduleInfo());
         if (!info.moduleDir) {
@@ -239,7 +240,7 @@
 
       const toggle = document.createElement("input");
       toggle.type = "checkbox";
-      toggle.checked = item.on === 1 || item.on === true;
+      toggle.checked = item.on === 1;
       toggle.dataset.file = item.file;
       toggle.style.cssText = "height:20px;width:20px";
 
@@ -407,9 +408,7 @@
       if (document.visibilityState !== "visible") {
         return;
       }
-      loadLibrary().catch(() => {
-        /* keep current list */
-      });
+      loadLibrary().catch(() => {});
     });
 
     loadLibrary().catch((err) => {

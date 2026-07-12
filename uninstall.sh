@@ -1,11 +1,11 @@
 #!/system/bin/sh
 
-if ! cd "$(dirname "$0")"; then
-  exit 0
-fi
-MODDIR=$(pwd)
-. "$MODDIR/scripts/lib.sh"
-
-overlay_clear
-log -t RandomBootanimation "uninstall: overlay cleared"
+for dest in \
+  /product/media/bootanimation.zip \
+  /system/media/bootanimation.zip \
+  /system/product/media/bootanimation.zip
+do
+  umount -l "$dest" 2>/dev/null
+done
+rm -f /data/adb/bootanimations/.active/bootanimation.zip
 exit 0
