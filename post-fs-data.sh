@@ -7,7 +7,7 @@ MODDIR=$(pwd)
 . "$MODDIR/scripts/lib.sh"
 
 if ! anim_ensure_dirs; then
-  log -t RandomBootanimation "Failed to prepare $ANIM_DIR"
+  log -t RandomBootanimation "failed to prepare $ANIM_DIR"
   overlay_clear
   exit 0
 fi
@@ -16,7 +16,7 @@ if anim_library_empty; then
   if [ -d "$MODDIR/BootAnimations" ]; then
     seed_bundled
     if ! anim_library_empty; then
-      log -t RandomBootanimation "Imported bundled default bootanimations"
+      log -t RandomBootanimation "imported bundled default bootanimations"
     fi
   fi
 fi

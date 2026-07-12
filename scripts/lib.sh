@@ -279,7 +279,7 @@ overlay_apply() {
     fi
   done
   if [ -z "$has_dev" ]; then
-    overlay_msg="No bootanimation path on this device"
+    overlay_msg="no bootanimation path on this device"
     overlay_clear
     return 1
   fi
@@ -287,7 +287,7 @@ overlay_apply() {
   enabled=$(anim_enabled_paths)
   if [ -z "$enabled" ]; then
     overlay_clear
-    overlay_msg="No enabled bootanimations"
+    overlay_msg="no enabled bootanimations"
     return 1
   fi
 
@@ -323,13 +323,13 @@ $enabled
 EOF
 
   if [ -z "$selected" ]; then
-    overlay_msg="Failed to pick bootanimation"
+    overlay_msg="failed to pick bootanimation"
     return 1
   fi
 
   overlay_clear
   if ! cp -af "$selected" "$ACTIVE_ZIP"; then
-    overlay_msg="Failed to stage $(basename "$selected")"
+    overlay_msg="failed to stage $(basename "$selected")"
     return 1
   fi
   chmod 0644 "$ACTIVE_ZIP" 2>/dev/null
@@ -347,10 +347,10 @@ EOF
 
   if [ "$ok" -eq 0 ]; then
     overlay_clear
-    overlay_msg="Failed to bind-mount $(basename "$selected")"
+    overlay_msg="failed to bind-mount $(basename "$selected")"
     return 1
   fi
 
-  overlay_msg="Selected: $(basename "$selected")"
+  overlay_msg="selected: $(basename "$selected")"
   return 0
 }
