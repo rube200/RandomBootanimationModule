@@ -1,5 +1,15 @@
 # Changelog
 
+## [v1.1.0]
+
+- Bind overlay skips missing stock paths (no longer remounts or creates them)
+- Disabled state and display labels stored in KernelSU module config
+- Install aborts if extract or chown fails
+- Manager description shows last selected animation via temp override
+- Module id derived as kebab-case of the repository name at release
+- Staged active zip path moved to `.active/bootanimation.zip`
+- Validation requires matching overlay paths and kebab-case module id
+
 ## [v1.0.1]
 
 - Log tag renamed to `RandomBootanimation` (was `random-bootanimation`)
