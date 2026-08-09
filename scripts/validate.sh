@@ -252,10 +252,10 @@ validate_module_scripts() {
       || warn "$f: KernelSU recommends MODDIR=\${0%/*}"
   done
 
-  [ -f scripts/lib.sh ] || fail "Missing scripts/lib.sh"
-
   if [ -d webroot ]; then
     [ -f scripts/webui.sh ] || fail "Missing scripts/webui.sh (required for webroot/)"
+    grep -q 'scripts/webui.sh' webroot/index.html \
+      || fail "webroot must invoke scripts/webui.sh"
   fi
 
   for path in \
@@ -297,6 +297,7 @@ validate_required_files() {
     customize.sh \
     module.prop \
     post-fs-data.sh \
+    scripts/lib.sh \
     uninstall.sh \
     update.json
   do
