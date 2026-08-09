@@ -45,25 +45,26 @@ check_file() {
 }
 
 check_html_file() {
-  local f=$1 dir ref resolved line
+  local f=$1 dir tag href resolved
   check_text_file "$f"
-  if grep -qiE '<(link[^>]*stylesheet[^>]*href|script[^>]+src)=[[:space:]]*["'\'' ]*(https?:)?//' "$f"; then
-    fail "$f: external stylesheets and scripts are not allowed"
-  fi
   dir=$(dirname "$f")
-  while IFS= read -r line; do
-    [[ "$line" =~ (href|src)=[[:space:]]*[\"\']([^\"\']+)[\"\'] ]] || continue
-    ref="${BASH_REMATCH[2]}"
-    if [[ "$ref" =~ ^(https?:)?// ]]; then
+  while IFS= read -r tag; do
+    if [[ "$tag" == \<link* ]] \
+      && ! [[ "$tag" =~ rel=[[:space:]]*[\"\'][^\"\']*(stylesheet|font)[^\"\']*[\"\'] ]] \
+      && ! [[ "$tag" =~ as=[[:space:]]*[\"\']font[\"\'] ]]; then
       continue
     fi
-    if [[ "$ref" =~ ^(data:|#|javascript:) ]]; then
+    [[ "$tag" =~ (href|src|data)=[[:space:]]*[\"\']([^\"\']+)[\"\'] ]] || continue
+    href="${BASH_REMATCH[2]}"
+    if [[ "$href" =~ ^(https?:)?// ]]; then
+      fail "$f: external stylesheets, scripts, fonts, and embeds are not allowed"
+    fi
+    if [[ "$href" =~ ^(data:|#|javascript:) ]]; then
       continue
     fi
-    ref="${ref#./}"
-    resolved="$dir/$ref"
-    [ -f "$resolved" ] || fail "$f: referenced file not found: $ref"
-  done < <(grep -ioE '<(link[^>]*stylesheet[^>]*href|script[^>]+src)=[^>]+>' "$f" 2>/dev/null || true)
+    resolved="$dir/${href#./}"
+    [ -f "$resolved" ] || fail "$f: referenced file not found: $href"
+  done < <(grep -ioE '<link[^>]*>|<script[^>]*>|<iframe[^>]*>|<embed[^>]*>|<object[^>]*>' "$f" 2>/dev/null || true)
 }
 
 check_js_file() {
@@ -180,7 +181,9 @@ validate_files() {
   while IFS= read -r -d '' f; do
     base=${f#./}
     check_file "$base"
-    [[ "$base" == *.sh ]] && sc_files+=("$base")
+    if [[ "$base" == *.sh ]]; then
+      sc_files+=("$base")
+    fi
   done < <(discover_text_files)
 
   if [ ${#sc_files[@]} -eq 0 ]; then
@@ -233,7 +236,7 @@ validate_module_prop() {
   fi
 }
 
-MODULE_SCRIPTS=(
+KSU_MODULE_SCRIPTS=(
   post-fs-data.sh
   uninstall.sh
 )
@@ -243,11 +246,11 @@ validate_module_scripts() {
   if [ -f customize.sh ] && ! grep -q 'SKIPUNZIP' customize.sh; then
     warn "customize.sh: consider setting SKIPUNZIP (see KernelSU docs)"
   fi
-  for f in "${MODULE_SCRIPTS[@]}"; do
+  for f in "${KSU_MODULE_SCRIPTS[@]}"; do
     [ -f "$f" ] || fail "Missing $f"
+    grep -q 'MODDIR=' "$f" \
+      || warn "$f: KernelSU recommends MODDIR=\${0%/*}"
   done
-  grep -q 'MODDIR=' post-fs-data.sh \
-    || fail "post-fs-data.sh: must set MODDIR=\${0%/*}"
 
   [ -f scripts/lib.sh ] || fail "Missing scripts/lib.sh"
 

@@ -9,16 +9,11 @@ ksu_ensure_module_id || exit 1
 
 UPLOAD_DIR=/data/local/tmp/random-bootanim-import
 
-json_escape() {
-  _tab=$(printf '\t')
-  _nl=$(printf '\n')
-  _cr=$(printf '\r')
-  printf '%s' "$1" | sed \
-    -e 's/\\/\\\\/g' \
-    -e 's/"/\\"/g' \
-    -e "s/${_tab}/\\\\t/g" \
-    -e "s/${_nl}/\\\\n/g" \
-    -e "s/${_cr}/\\\\r/g"
+b64_decode() {
+  if base64 -d "$1" >"$2" 2>/dev/null; then
+    return 0
+  fi
+  base64 --decode "$1" >"$2"
 }
 
 import_anim() {
@@ -31,6 +26,34 @@ import_anim() {
     label=$(anim_display_label "$(basename "$src")")
   fi
   anim_add "$src" "$label"
+}
+
+json_escape() {
+  _tab=$(printf '\t')
+  _nl=$(printf '\n')
+  _cr=$(printf '\r')
+  printf '%s' "$1" | sed \
+    -e 's/\\/\\\\/g' \
+    -e 's/"/\\"/g' \
+    -e "s/${_tab}/\\\\t/g" \
+    -e "s/${_nl}/\\\\n/g" \
+    -e "s/${_cr}/\\\\r/g"
+}
+
+list_json() {
+  anim_zip_paths | while IFS= read -r path; do
+    if [ -z "$path" ]; then
+      continue
+    fi
+    name=$(basename "$path")
+    label=$(json_escape "$(anim_label_show "$name")")
+    file=$(json_escape "$name")
+    on=0
+    if anim_enabled "$name"; then
+      on=1
+    fi
+    printf '{"file":"%s","label":"%s","on":%s}\n' "$file" "$label" "$on"
+  done
 }
 
 remove_anim() {
@@ -56,45 +79,6 @@ set_enabled() {
   else
     return 1
   fi
-}
-
-list_json() {
-  anim_zip_paths | while IFS= read -r path; do
-    if [ -z "$path" ]; then
-      continue
-    fi
-    name=$(basename "$path")
-    label=$(json_escape "$(anim_label_show "$name")")
-    file=$(json_escape "$name")
-    on=0
-    if anim_enabled "$name"; then
-      on=1
-    fi
-    printf '{"file":"%s","label":"%s","on":%s}\n' "$file" "$label" "$on"
-  done
-}
-
-seed_bundled() {
-  find "$MODDIR/BootAnimations" -maxdepth 1 -type f -iname '*.zip' -print 2>/dev/null \
-    | LC_ALL=C sort \
-    | while IFS= read -r src; do
-    if [ -z "$src" ]; then
-      continue
-    fi
-    base=$(basename "$src")
-    if [ -f "$ANIM_DIR/$base" ]; then
-      anim_disabled_remove "$base"
-      continue
-    fi
-    anim_add "$src" "$(anim_display_label "$base")"
-  done
-}
-
-b64_decode() {
-  if base64 -d "$1" >"$2" 2>/dev/null; then
-    return 0
-  fi
-  base64 --decode "$1" >"$2"
 }
 
 upload_abort() {
@@ -151,7 +135,7 @@ case "$1" in
   list)
     if anim_library_empty; then
       if [ -d "$MODDIR/BootAnimations" ]; then
-        seed_bundled
+        anim_seed_bundled
       fi
     fi
     list_json
@@ -166,7 +150,7 @@ case "$1" in
     if [ ! -d "$MODDIR/BootAnimations" ]; then
       exit 1
     fi
-    seed_bundled
+    anim_seed_bundled
     ;;
   toggle)
     if ! set_enabled "$2" "$3"; then

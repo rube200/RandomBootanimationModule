@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.1.1]
+
+- HTML validation also flags external `<link>` (stylesheet/font), `<iframe>`, `<embed>`, and `<object>` references
+- `MODDIR=` convention check now warns instead of fails, and covers `uninstall.sh` as well as `post-fs-data.sh`
+
 ## [v1.1.0]
 
 - Bind overlay skips missing stock paths (no longer remounts or creates them)

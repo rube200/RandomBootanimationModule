@@ -6,17 +6,6 @@ ksu_ensure_module_id || exit 0
 
 ACTIVE="$ANIM_DIR/.active/bootanimation.zip"
 
-overlay_clear() {
-  for dest in \
-    /product/media/bootanimation.zip \
-    /system/media/bootanimation.zip \
-    /system/product/media/bootanimation.zip
-  do
-    umount -l "$dest" 2>/dev/null
-  done
-  rm -f "$ACTIVE"
-}
-
 overlay_apply() {
   src="$1"
   mkdir -p "$(dirname "$ACTIVE")" || return 1
@@ -51,20 +40,15 @@ overlay_apply() {
   [ "$ok" -eq 1 ]
 }
 
-seed_bundled() {
-  find "$MODDIR/BootAnimations" -maxdepth 1 -type f -iname '*.zip' -print 2>/dev/null \
-    | LC_ALL=C sort \
-    | while IFS= read -r src; do
-    if [ -z "$src" ]; then
-      continue
-    fi
-    base=$(basename "$src")
-    if [ -f "$ANIM_DIR/$base" ]; then
-      anim_disabled_remove "$base"
-      continue
-    fi
-    anim_add "$src" "$(anim_display_label "$base")"
+overlay_clear() {
+  for dest in \
+    /product/media/bootanimation.zip \
+    /system/media/bootanimation.zip \
+    /system/product/media/bootanimation.zip
+  do
+    umount -l "$dest" 2>/dev/null
   done
+  rm -f "$ACTIVE"
 }
 
 if ! anim_ensure_dirs; then
@@ -75,7 +59,7 @@ fi
 
 if anim_library_empty; then
   if [ -d "$MODDIR/BootAnimations" ]; then
-    seed_bundled
+    anim_seed_bundled
   fi
 fi
 
