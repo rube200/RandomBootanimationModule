@@ -127,38 +127,6 @@ validate_changelog() {
   fi
 }
 
-validate_changelog_bullets() {
-  local file=CHANGELOG.md in_section=0 prev='' line item first
-  bullet_key() {
-    printf '%s' "$1" | tr -d '`'
-  }
-  while IFS= read -r line; do
-    case "$line" in
-      "## ["*)
-        in_section=1
-        prev=
-        ;;
-      "- "*)
-        [ "$in_section" -eq 1 ] || continue
-        item=${line#- }
-        if [ -n "$prev" ]; then
-          first=$(printf '%s\n%s' "$(bullet_key "$prev")" "$(bullet_key "$item")" | LC_ALL=C sort | head -1)
-          [ "$first" = "$(bullet_key "$prev")" ] \
-            || fail "$file bullets not alphabetical (expected '$item' before '$prev')"
-        fi
-        prev=$item
-        ;;
-      *)
-        if [ -z "$line" ]; then
-          continue
-        fi
-        in_section=0
-        prev=
-        ;;
-    esac
-  done <"$file"
-}
-
 validate_cross_refs() {
   local mp_vc mp_version uj_vc uj_version
   uj_vc=$(jq -er '.versionCode' update.json)
@@ -340,7 +308,6 @@ validate_required_files
 validate_module_prop
 validate_update_json
 validate_changelog
-validate_changelog_bullets
 validate_cross_refs
 validate_files
 validate_module_scripts

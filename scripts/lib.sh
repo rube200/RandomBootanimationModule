@@ -1,8 +1,10 @@
 #!/system/bin/sh
 
 ANIM_DIR=/data/adb/bootanimations
+# shellcheck disable=SC2034
 UPLOAD_BASE="$ANIM_DIR/.import"
 
+# shellcheck disable=SC2034
 OVERLAY_DESTS='/product/media/bootanimation.zip
 /system/media/bootanimation.zip
 /system/product/media/bootanimation.zip'

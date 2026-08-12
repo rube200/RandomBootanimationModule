@@ -8,7 +8,7 @@ MODDIR=${0%/*}/..
 ksu_ensure_module_id || exit 1
 
 MAX_UPLOAD_BYTES=$((64 * 1024 * 1024))
-MAX_UPLOAD_B64_BYTES=$((MAX_UPLOAD_BYTES / 3 * 4))
+MAX_UPLOAD_B64_BYTES=$(((MAX_UPLOAD_BYTES + 2) * 4 / 3))
 
 b64_decode() {
   if base64 -d "$1" >"$2" 2>/dev/null; then
