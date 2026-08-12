@@ -6,21 +6,24 @@ ksu_ensure_module_id || exit 0
 
 ACTIVE="$ANIM_DIR/.active/bootanimation.zip"
 
+rm -rf "$UPLOAD_BASE"
+
 overlay_apply() {
   src="$1"
-  mkdir -p "$(dirname "$ACTIVE")" || return 1
-  cp -af "$src" "$ACTIVE" || return 1
+  if ! mkdir -p "$(dirname "$ACTIVE")"; then
+    return 1
+  fi
+  if ! cp -af "$src" "$ACTIVE"; then
+    return 1
+  fi
   chmod 0644 "$ACTIVE" 2>/dev/null
   if command -v chcon >/dev/null 2>&1; then
     chcon u:object_r:system_file:s0 "$ACTIVE" 2>/dev/null
   fi
 
   ok=0
-  for dest in \
-    /product/media/bootanimation.zip \
-    /system/media/bootanimation.zip \
-    /system/product/media/bootanimation.zip
-  do
+  while IFS= read -r dest; do
+    [ -n "$dest" ] || continue
     if [ -L "$dest" ] && [ ! -e "$dest" ]; then
       log -t RandomBootanimation "bind skip: $dest (broken symlink)"
       continue
@@ -36,18 +39,19 @@ overlay_apply() {
     else
       log -t RandomBootanimation "bind failed: $dest"
     fi
-  done
+  done <<EOF
+$OVERLAY_DESTS
+EOF
   [ "$ok" -eq 1 ]
 }
 
 overlay_clear() {
-  for dest in \
-    /product/media/bootanimation.zip \
-    /system/media/bootanimation.zip \
-    /system/product/media/bootanimation.zip
-  do
+  while IFS= read -r dest; do
+    [ -n "$dest" ] || continue
     umount -l "$dest" 2>/dev/null
-  done
+  done <<EOF
+$OVERLAY_DESTS
+EOF
   rm -f "$ACTIVE"
 }
 

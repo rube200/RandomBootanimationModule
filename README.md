@@ -76,6 +76,7 @@ Install
 Boot
   └─ post-fs-data.sh
        ├─ Create /data/adb/bootanimations if needed
+       ├─ Clear leftover .import/ staging from interrupted uploads
        ├─ Seed bundled defaults when library is empty
        ├─ Pick one random enabled zip (enabled state from module config)
        ├─ Stage to .active/bootanimation.zip, then bind-mount over each
@@ -103,8 +104,13 @@ Bind-mount must succeed on at least one path. Missing files and broken symlinks 
 ```text
 /data/adb/bootanimations/
   .active/      staged bootanimation.zip used as bind-mount source
+  .import/      WebUI upload staging, one folder per import
   *.zip         your boot animation files (any filename; spaces OK)
 ```
+
+`.import/` holds partially uploaded files while an import is in progress. A
+completed or failed import removes its own folder, and anything left behind by
+an interrupted import is cleared on the next boot.
 
 Enabled/disabled state and display labels are stored in KernelSU module config (`library.disabled`, `library.labels`), not as files under the library folder.
 
@@ -119,7 +125,7 @@ Eight defaults ship in `BootAnimations/` from [mauam's Bootanimations collection
 | Animation unchanged after reboot | Run `logcat -d -s RandomBootanimation` — look for `bind ok:` on your ROM path. If you see `bind skip:` (missing), restore or recreate stock `bootanimation.zip` (below). On some ROMs bootanim reads the file before `post-fs-data` runs; that timing limit cannot be fixed in-module |
 | `chown: unknown user/group` during install | Old module zip without `customize.sh`. Install a current release |
 | Custom animation after disabling the module | Reboot once. Disabled modules skip `post-fs-data.sh`, so no new bind is applied |
-| Import fails | File must be a valid `.zip`; name must not already exist in the library (case-insensitive) |
+| Import fails | File must start with the `PK\x03\x04` zip header, be at most 64 MB, and its name must not already exist in the library (case-insensitive) |
 | Stock boot animation after install | Open WebUI → confirm at least one animation is enabled → reboot. Manager description should show a last selection after a successful boot |
 | Toggles/labels reset after update from v1.0.x | Enabled state and labels moved from `.meta/` files to KernelSU module config; re-apply toggles in the WebUI |
 | WebUI list is empty after install | Tap **Refresh**, or leave and reopen WebUI |
@@ -141,7 +147,7 @@ Use `/system` or `/system/product` instead of `/product` if that is where your R
 **Disable and uninstall**
 
 - **Disable** — Reboot. The module no longer runs at boot, so stock boot animation is used.
-- **Uninstall** — `uninstall.sh` umounts any active bind mounts and removes `.active/`. Your zip library at `/data/adb/bootanimations` is not deleted. Module config (toggles and labels) is cleared with the module.
+- **Uninstall** — `uninstall.sh` umounts any active bind mounts and removes `.active/` and `.import/`. Your zip library at `/data/adb/bootanimations` is not deleted. Module config (toggles and labels) is cleared with the module.
 
 ## Debugging
 
@@ -159,7 +165,7 @@ Look for `bind ok:`, `bind failed:`, `bind skip:`, or `selected:` lines. Module 
 bash scripts/validate.sh
 ```
 
-Requires `jq` and `shellcheck`. Checks required module files, `module.prop`, placeholder `update.json`, WebUI assets (no external URLs), UTF-8 without BOM, LF line endings, and alphabetical changelog bullets.
+Requires `jq` and `shellcheck`. Checks required module files, `module.prop`, placeholder `update.json`, WebUI assets (no external URLs), UTF-8 without BOM, LF line endings, and changelog section headings.
 
 Release builds run on GitHub Actions when a `v*` tag is pushed. The workflow fills in `update.json`, sets `module.prop` `id` to the kebab-case form of the repository name (e.g. `RandomBootanimationModule` → `random-bootanimation-module`), ships `LICENSE` in the module zip, and publishes the release. Until then, `update.json` uses `versionCode: 0` as a template; CI ignores that file on push so bot bumps do not re-trigger validation.
 
@@ -174,7 +180,7 @@ customize.sh                    install hook (SKIPUNZIP extract + chown -R; not 
 LICENSE                         MIT license for module code (shipped in release zip)
 module.prop                     module metadata
 post-fs-data.sh                 boot-time selection and overlay
-scripts/lib.sh                  shared library helpers and KernelSU config helpers
+scripts/lib.sh                  shared paths, overlay destinations, library and KernelSU config helpers
 scripts/validate.sh             CI checks
 scripts/webui.sh                WebUI backend
 uninstall.sh                    umount overlays on module removal

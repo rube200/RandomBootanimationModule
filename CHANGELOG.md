@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+- Import staging moved into the library at `.import/` from `/data/local/tmp`, which the shell user can write to
+- Labels and filenames reject embedded newlines, which could forge module config entries
+- Zip validation requires the full `PK\x03\x04` local file header, not a two-byte prefix
+- Imports are capped at 64 MB
+- Concurrent imports use isolated staging, so chunks can no longer interleave
+- Boot clears any leftover import staging directory
+- `uninstall.sh` also removes the import staging directory
+- Overlay destinations defined once in `scripts/lib.sh`
+- Release workflow passes context values through the environment instead of inlining `${{ }}` into shell
+- CI workflow runs with least-privilege `contents: read` permissions
+
 ## [v1.1.1]
 
 - HTML validation also flags external `<link>` (stylesheet/font), `<iframe>`, `<embed>`, and `<object>` references

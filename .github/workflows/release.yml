@@ -30,8 +30,8 @@ jobs:
       - name: Verify manual release branch
         if: github.event_name == 'workflow_dispatch'
         run: |
-          [ "${{ github.ref_name }}" = "$DEFAULT_BRANCH" ] || {
-            echo "Manual releases must run on $DEFAULT_BRANCH (current: ${{ github.ref_name }})"
+          [ "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" ] || {
+            echo "Manual releases must run on $DEFAULT_BRANCH (current: $GITHUB_REF_NAME)"
             exit 1
           }
 
@@ -53,7 +53,6 @@ jobs:
         id: prepare
         env:
           REPO_NAME: ${{ github.event.repository.name }}
-          REPO_OWNER: ${{ github.repository_owner }}
         run: |
           [[ "$RELEASE_VERSION" =~ ^v[0-9A-Za-z._-]+$ ]] || { echo "Invalid version: $RELEASE_VERSION"; exit 1; }
 
@@ -74,19 +73,36 @@ jobs:
             | tr '_' '-')
 
           sed -i "s|^id=INJECTED|id=${MODULE_ID}|" module.prop
-          sed -i "s|^author=INJECTED|author=${REPO_OWNER}|" module.prop
+          sed -i "s|^author=INJECTED|author=${GITHUB_REPOSITORY_OWNER}|" module.prop
           sed -i "s|^version=.*|version=${RELEASE_VERSION}|" module.prop
           sed -i "s|^versionCode=.*|versionCode=${versionCode}|" module.prop
-          sed -i "s|^updateJson=.*|updateJson=https://raw.githubusercontent.com/${{ github.repository }}/${DEFAULT_BRANCH}/update.json|" module.prop
+          sed -i "s|^updateJson=.*|updateJson=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${DEFAULT_BRANCH}/update.json|" module.prop
 
           echo "id=${MODULE_ID}" >> "$GITHUB_OUTPUT"
           echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
           echo "versionCode=$versionCode" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare changelog
+        run: |
+          if grep -qF "## [$RELEASE_VERSION]" CHANGELOG.md; then
+            if grep -qF '## [Unreleased]' CHANGELOG.md; then
+              echo "Error: CHANGELOG.md has both '## [$RELEASE_VERSION]' and '## [Unreleased]'; fold the unreleased entries into the release section" >&2
+              exit 1
+            fi
+            echo "CHANGELOG.md already has '## [$RELEASE_VERSION]'"
+            exit 0
+          fi
+
+          if ! grep -qF '## [Unreleased]' CHANGELOG.md; then
+            echo "Error: CHANGELOG.md has neither '## [$RELEASE_VERSION]' nor '## [Unreleased]'; add release notes before tagging" >&2
+            exit 1
+          fi
+
+          sed -i "s|^## \[Unreleased\]\$|## [$RELEASE_VERSION]|" CHANGELOG.md
+          echo "Renamed '## [Unreleased]' to '## [$RELEASE_VERSION]'"
+
       - name: Validate module
         env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          RELEASE_VERSION: ${{ env.RELEASE_VERSION }}
           REPO_NAME: ${{ github.event.repository.name }}
         run: bash scripts/validate.sh
 
@@ -149,7 +165,7 @@ jobs:
             gh release create "$VERSION" --title "$VERSION" --notes-file release-notes.md "$ZIP"
           fi
 
-      - name: Commit and push update.json
+      - name: Commit and push release metadata
         id: push_update
         env:
           VERSION: ${{ steps.prepare.outputs.version }}
@@ -161,6 +177,8 @@ jobs:
           git fetch origin "$DEFAULT_BRANCH"
           git checkout -f "$DEFAULT_BRANCH"
           git reset --hard "origin/$DEFAULT_BRANCH"
+
+          sed -i "s|^## \[Unreleased\]\$|## [$VERSION]|" CHANGELOG.md
 
           jq -n \
             --arg changelog "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${DEFAULT_BRANCH}/CHANGELOG.md" \
@@ -175,14 +193,14 @@ jobs:
             }' > update.json.tmp
           mv update.json.tmp update.json
 
-          git add update.json
+          git add CHANGELOG.md update.json
 
           if git diff --staged --quiet; then
             echo "Error: update.json unchanged for $VERSION" >&2
             exit 1
           fi
 
-          git commit -m "[BOT] Bump update.json for $VERSION"
+          git commit -m "[BOT] Release $VERSION"
           git push origin "$DEFAULT_BRANCH"
 
       - name: Roll back release

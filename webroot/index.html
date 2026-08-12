@@ -105,6 +105,12 @@
 
     const sh = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
 
+    function randomToken() {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+
     async function execApi(cmd) {
       return new Promise((resolve, reject) => {
         window.__ksuApiResult = (code, stdout, stderr) => {
@@ -211,15 +217,16 @@
     }
 
     async function uploadZip(file) {
-      await api("upload-reset", file.name);
+      const session = randomToken();
+      await api("upload-reset", session, file.name);
       let offset = 0;
       while (offset < file.size) {
         const slice = file.slice(offset, offset + BIN_CHUNK);
         const buf = await slice.arrayBuffer();
-        await api("upload-append", bytesToBase64(new Uint8Array(buf)));
+        await api("upload-append", session, bytesToBase64(new Uint8Array(buf)));
         offset += BIN_CHUNK;
       }
-      await api("import-upload", file.name, ui.label.value.trim());
+      await api("import-upload", session, file.name, ui.label.value.trim());
     }
 
     function renderRow(item) {

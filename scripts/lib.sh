@@ -1,6 +1,15 @@
 #!/system/bin/sh
 
 ANIM_DIR=/data/adb/bootanimations
+UPLOAD_BASE="$ANIM_DIR/.import"
+
+OVERLAY_DESTS='/product/media/bootanimation.zip
+/system/media/bootanimation.zip
+/system/product/media/bootanimation.zip'
+
+_NL='
+'
+_CR=$(printf '\r')
 
 _cfg_disabled_list() {
   ksu_cfg_get library.disabled
@@ -133,8 +142,9 @@ EOF
 }
 
 anim_is_zip_file() {
-  sig=$(head -c 2 "$1" 2>/dev/null)
-  [ "$sig" = "PK" ]
+  sig=$(od -An -tx1 -N4 "$1" 2>/dev/null | tr -d ' \n')
+  # "PK\x03\x04" - Non-empty archive.
+  [ "$sig" = "504b0304" ]
 }
 
 anim_label_get() {
@@ -156,7 +166,7 @@ anim_label_get() {
 
 anim_label_set() {
   name="$1"
-  label="$2"
+  label=$(printf '%s' "$2" | tr -d '\n\r')
   list=$(_cfg_labels_list)
   out=
   found=0
@@ -244,6 +254,7 @@ anim_require_zip() {
 anim_safe_name() {
   case "$1" in
     */* | *..*) return 1 ;;
+    *"$_NL"* | *"$_CR"*) return 1 ;;
   esac
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
     *.zip) return 0 ;;

@@ -7,7 +7,8 @@ MODDIR=${0%/*}/..
 . "$MODDIR/scripts/lib.sh"
 ksu_ensure_module_id || exit 1
 
-UPLOAD_DIR=/data/local/tmp/random-bootanim-import
+MAX_UPLOAD_BYTES=$((64 * 1024 * 1024))
+MAX_UPLOAD_B64_BYTES=$((MAX_UPLOAD_BYTES / 3 * 4))
 
 b64_decode() {
   if base64 -d "$1" >"$2" 2>/dev/null; then
@@ -81,8 +82,33 @@ set_enabled() {
   fi
 }
 
+upload_session_dir() {
+  token="$1"
+  if [ "${#token}" -ne 32 ]; then
+    return 1
+  fi
+  case "$token" in
+    *[!0-9a-f]*) return 1 ;;
+  esac
+  printf '%s/%s' "$UPLOAD_BASE" "$token"
+}
+
 upload_abort() {
-  rm -rf "$UPLOAD_DIR"
+  if [ -n "$1" ]; then
+    rm -rf "$1"
+  fi
+}
+
+upload_base_ensure() {
+  if [ -L "$UPLOAD_BASE" ] || { [ -e "$UPLOAD_BASE" ] && [ ! -d "$UPLOAD_BASE" ]; }; then
+    if ! rm -rf "$UPLOAD_BASE"; then
+      return 1
+    fi
+  fi
+  if ! mkdir -p "$UPLOAD_BASE"; then
+    return 1
+  fi
+  chmod 0700 "$UPLOAD_BASE" 2>/dev/null
 }
 
 if ! anim_ensure_dirs; then
@@ -91,46 +117,51 @@ fi
 
 case "$1" in
   import-upload)
-    name="$2"
-    label="$3"
+    token="$2"
+    name="$3"
+    label="$4"
+    if ! dir=$(upload_session_dir "$token"); then
+      printf 'Invalid upload session.\n' >&2
+      exit 1
+    fi
     if ! anim_safe_name "$name"; then
-      upload_abort
+      upload_abort "$dir"
       printf 'Invalid upload name: %s\n' "$name" >&2
       exit 1
     fi
-    staged="$UPLOAD_DIR/import.zip"
-    b64="$UPLOAD_DIR/import.b64"
-    if [ ! -f "$UPLOAD_DIR/.name" ]; then
-      upload_abort
+    staged="$dir/import.zip"
+    b64="$dir/import.b64"
+    if [ ! -f "$dir/.name" ]; then
+      upload_abort "$dir"
       printf 'Upload session mismatch.\n' >&2
       exit 1
     fi
-    if [ "$(cat "$UPLOAD_DIR/.name")" != "$name" ]; then
-      upload_abort
+    if [ "$(cat "$dir/.name")" != "$name" ]; then
+      upload_abort "$dir"
       printf 'Upload session mismatch.\n' >&2
       exit 1
     fi
     if [ ! -f "$b64" ]; then
-      upload_abort
+      upload_abort "$dir"
       printf 'Upload data missing.\n' >&2
       exit 1
     fi
     if ! b64_decode "$b64" "$staged"; then
-      upload_abort
+      upload_abort "$dir"
       printf 'Failed to decode uploaded file.\n' >&2
       exit 1
     fi
-    library="$UPLOAD_DIR/$name"
+    library="$dir/$name"
     if ! cp -af "$staged" "$library"; then
-      upload_abort
+      upload_abort "$dir"
       printf 'Failed to stage uploaded file.\n' >&2
       exit 1
     fi
     if ! import_anim "$library" "$label"; then
-      upload_abort
+      upload_abort "$dir"
       exit 1
     fi
-    upload_abort
+    upload_abort "$dir"
     ;;
   list)
     if anim_library_empty; then
@@ -159,28 +190,48 @@ case "$1" in
     fi
     ;;
   upload-append)
-    chunk="$2"
+    token="$2"
+    chunk="$3"
+    if ! dir=$(upload_session_dir "$token"); then
+      printf 'Upload session not started.\n' >&2
+      exit 1
+    fi
     if [ -z "$chunk" ]; then
       printf 'Upload session not started.\n' >&2
       exit 1
     fi
-    if [ ! -f "$UPLOAD_DIR/.name" ]; then
+    if [ ! -f "$dir/.name" ]; then
       printf 'Upload session not started.\n' >&2
       exit 1
     fi
-    printf '%s' "$chunk" >>"$UPLOAD_DIR/import.b64"
+    printf '%s' "$chunk" >>"$dir/import.b64"
+    size=$(wc -c <"$dir/import.b64" 2>/dev/null || echo 0)
+    if [ "$size" -gt "$MAX_UPLOAD_B64_BYTES" ]; then
+      upload_abort "$dir"
+      printf 'Upload too large.\n' >&2
+      exit 1
+    fi
     ;;
   upload-reset)
-    name="$2"
+    token="$2"
+    name="$3"
+    if ! dir=$(upload_session_dir "$token"); then
+      printf 'Invalid upload session.\n' >&2
+      exit 1
+    fi
     if ! anim_safe_name "$name"; then
       printf 'Invalid upload name: %s\n' "$name" >&2
       exit 1
     fi
-    upload_abort
-    if ! mkdir -p "$UPLOAD_DIR"; then
+    upload_abort "$dir"
+    if ! upload_base_ensure; then
       exit 1
     fi
-    if ! printf '%s' "$name" >"$UPLOAD_DIR/.name"; then
+    if ! mkdir -p "$dir"; then
+      exit 1
+    fi
+    chmod 0700 "$dir" 2>/dev/null
+    if ! printf '%s' "$name" >"$dir/.name"; then
       exit 1
     fi
     ;;

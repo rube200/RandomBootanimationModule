@@ -263,8 +263,12 @@ validate_module_scripts() {
     '/system/media/bootanimation.zip' \
     '/system/product/media/bootanimation.zip'
   do
-    grep -qF "$path" post-fs-data.sh uninstall.sh \
-      || fail "post-fs-data.sh and uninstall.sh must use the same overlay path: $path"
+    grep -qF "$path" scripts/lib.sh \
+      || fail "scripts/lib.sh OVERLAY_DESTS must include overlay path: $path"
+  done
+  for f in post-fs-data.sh uninstall.sh; do
+    grep -q 'OVERLAY_DESTS' "$f" \
+      || fail "$f must use OVERLAY_DESTS so bind and unmount stay symmetric"
   done
   grep -q 'mount -o bind' post-fs-data.sh \
     || fail "post-fs-data.sh must bind-mount"
