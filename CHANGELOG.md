@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v1.1.2]
 
 - Import staging moved into the library at `.import/` from `/data/local/tmp`, which the shell user can write to
 - Labels and filenames reject embedded newlines, which could forge module config entries
